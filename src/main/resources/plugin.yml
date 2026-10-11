@@ -1,0 +1,14 @@
+name: VillagerShop
+version: "1.0"
+main: id.vshop.VillagerShopPlugin
+api-version: "1.21"
+description: Villager shop dengan GUI editor trade
+commands:
+  vshop:
+    description: Buka menu VillagerShop
+    usage: /vshop [menu|spawn <nama>|list|reload]
+    permission: vshop.admin
+permissions:
+  vshop.admin:
+    description: Boleh memakai /vshop
+    default: op
