@@ -1,7 +1,10 @@
 package id.vshop;
 
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.block.Block;
+import org.bukkit.inventory.Merchant;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
@@ -12,6 +15,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.memory.MemoryKey;
 import org.bukkit.entity.Villager;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.MerchantRecipe;
@@ -37,6 +41,33 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
     public static final List<String> PROFESSIONS = List.of(
             "librarian", "cleric", "farmer", "armorer", "butcher", "cartographer", "fisherman",
             "fletcher", "leatherworker", "mason", "shepherd", "toolsmith", "weaponsmith", "nitwit");
+
+    public static final List<String> TYPES = List.of(
+            "plains", "desert", "jungle", "savanna", "snow", "swamp", "taiga");
+
+    /** Blok kerja villager dan profesi yang dihasilkannya. */
+    public static final Map<Material, String> WORKSTATIONS = Map.ofEntries(
+            Map.entry(Material.LECTERN, "librarian"),
+            Map.entry(Material.BREWING_STAND, "cleric"),
+            Map.entry(Material.COMPOSTER, "farmer"),
+            Map.entry(Material.BLAST_FURNACE, "armorer"),
+            Map.entry(Material.SMOKER, "butcher"),
+            Map.entry(Material.CARTOGRAPHY_TABLE, "cartographer"),
+            Map.entry(Material.BARREL, "fisherman"),
+            Map.entry(Material.FLETCHING_TABLE, "fletcher"),
+            Map.entry(Material.CAULDRON, "leatherworker"),
+            Map.entry(Material.STONECUTTER, "mason"),
+            Map.entry(Material.LOOM, "shepherd"),
+            Map.entry(Material.SMITHING_TABLE, "toolsmith"),
+            Map.entry(Material.GRINDSTONE, "weaponsmith"));
+
+    /** Ikon blok kerja untuk sebuah profesi (NAME_TAG kalau tidak punya, misalnya nitwit). */
+    public static Material workstationOf(String profession) {
+        for (Map.Entry<Material, String> e : WORKSTATIONS.entrySet()) {
+            if (e.getValue().equalsIgnoreCase(profession)) return e.getKey();
+        }
+        return Material.NAME_TAG;
+    }
 
     private static final Set<String> SKIP_ENCHANTS = Set.of("binding_curse", "vanishing_curse");
 
@@ -90,9 +121,10 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
             shop.profession = s.getString("profession", "librarian");
             shop.type = s.getString("type", "plains");
             shop.level = s.getInt("level", 5);
-            shop.noAI = s.getBoolean("no-ai", true);
-            shop.invulnerable = s.getBoolean("invulnerable", true);
+            shop.noAI = s.getBoolean("no-ai", false);
+            shop.invulnerable = s.getBoolean("invulnerable", false);
             shop.maxUses = s.getInt("max-uses", 9999999);
+            shop.jobSite = s.getString("job-site", "");
 
             ConfigurationSection ts = s.getConfigurationSection("trades");
             if (ts != null) {
@@ -127,6 +159,7 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
             y.set(p + ".no-ai", s.noAI);
             y.set(p + ".invulnerable", s.invulnerable);
             y.set(p + ".max-uses", s.maxUses);
+            y.set(p + ".job-site", s.jobSite);
             for (int i = 0; i < s.trades.size(); i++) {
                 Trade t = s.trades.get(i);
                 String tp = p + ".trades." + i;
@@ -193,9 +226,38 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
         return added;
     }
 
+    /** Tambah enchant acak yang belum ada di shop. Return jumlah trade baru. */
+    public int addRandomBooks(Shop shop, int count, int price, boolean maxLevel) {
+        Set<String> existing = new HashSet<>();
+        for (Trade t : shop.trades) {
+            if (t.result().getItemMeta() instanceof EnchantmentStorageMeta meta) {
+                for (Enchantment e : meta.getStoredEnchants().keySet()) {
+                    existing.add(e.getKey().getKey());
+                }
+            }
+        }
+        List<Enchantment> pool = new ArrayList<>();
+        for (Enchantment e : Registry.ENCHANTMENT) {
+            String key = e.getKey().getKey();
+            if (!SKIP_ENCHANTS.contains(key) && !existing.contains(key)) pool.add(e);
+        }
+        java.util.Collections.shuffle(pool);
+
+        int added = 0;
+        for (Enchantment e : pool) {
+            if (added >= count) break;
+            int level = maxLevel
+                    ? e.getMaxLevel()
+                    : 1 + java.util.concurrent.ThreadLocalRandom.current().nextInt(e.getMaxLevel());
+            shop.trades.add(new Trade(new ItemStack(Material.EMERALD, price), null, book(e, level)));
+            added++;
+        }
+        return added;
+    }
+
     // ------------------------------------------------------------ spawn
 
-    public void spawn(Player player, Shop shop) {
+    public List<MerchantRecipe> recipes(Shop shop) {
         List<MerchantRecipe> recipes = new ArrayList<>();
         for (Trade t : shop.trades) {
             MerchantRecipe r = new MerchantRecipe(t.result().clone(), 0, shop.maxUses, false);
@@ -204,6 +266,65 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
             if (t.b() != null) r.addIngredient(t.b().clone());
             recipes.add(r);
         }
+        return recipes;
+    }
+
+    /** Buka menu trade langsung, tanpa membuat mob. */
+    public void openShop(Player player, Shop shop) {
+        List<MerchantRecipe> recipes = recipes(shop);
+        if (recipes.isEmpty()) {
+            player.sendMessage("Shop '" + shop.name + "' belum punya trade.");
+            return;
+        }
+        String title = (shop.displayName == null || shop.displayName.isBlank()) ? shop.name : shop.displayName;
+        Merchant m = Bukkit.createMerchant(LegacyComponentSerializer.legacyAmpersand().deserialize(title));
+        m.setRecipes(recipes);
+        player.openMerchant(m, true);
+    }
+
+    // ------------------------------------------------------------ blok toko
+
+    public static String blockKey(Block b) {
+        return b.getWorld().getName() + ";" + b.getX() + ";" + b.getY() + ";" + b.getZ();
+    }
+
+    /** Ubah "dunia;x;y;z" menjadi Location, atau null kalau kosong/tidak valid. */
+    public Location jobSiteLocation(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            String[] p = s.split(";");
+            var world = Bukkit.getWorld(p[0]);
+            if (world == null) return null;
+            return new Location(world, Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private final Map<UUID, Shop> binding = new ConcurrentHashMap<>();
+
+    public void startBinding(Player p, Shop shop) {
+        binding.put(p.getUniqueId(), shop);
+        prompt(p, "Klik kanan blok kerja untuk shop '" + shop.name
+                        + "' (lectern, composter, smoker, dll.). Ketik apa saja di chat untuk membatalkan.",
+                text -> {
+                    binding.remove(p.getUniqueId());
+                    p.sendMessage("Dibatalkan.");
+                });
+    }
+
+    public Shop takeBinding(UUID id) {
+        Shop s = binding.remove(id);
+        if (s != null) takePending(id);
+        return s;
+    }
+
+    public boolean isBinding(UUID id) {
+        return binding.containsKey(id);
+    }
+
+    public void spawn(Player player, Shop shop) {
+        List<MerchantRecipe> recipes = recipes(shop);
         if (recipes.isEmpty()) {
             player.sendMessage("Shop '" + shop.name + "' belum punya trade.");
             return;
@@ -219,7 +340,11 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
                     NamespacedKey.minecraft(shop.type.toLowerCase(Locale.ROOT)));
             if (type != null) v.setVillagerType(type);
 
-            v.setVillagerLevel(Math.max(1, Math.min(5, shop.level)));
+            int lvl = Math.max(1, Math.min(5, shop.level));
+            v.setVillagerLevel(lvl);
+            v.setVillagerExperience(new int[]{0, 10, 70, 150, 250}[lvl - 1]);
+            Location jobSite = jobSiteLocation(shop.jobSite);
+            if (jobSite != null) v.setMemory(MemoryKey.JOB_SITE, jobSite);
             v.setAI(!shop.noAI);
             v.setInvulnerable(shop.invulnerable);
             v.setPersistent(true);
@@ -270,7 +395,23 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
                 }
                 spawn(p, shop);
             }
-            default -> sender.sendMessage("Pakai: /vshop [menu|spawn <nama>|list|reload]");
+            case "open" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage("Hanya untuk pemain.");
+                    return true;
+                }
+                if (args.length < 2) {
+                    p.sendMessage("Pakai: /vshop open <nama_shop>");
+                    return true;
+                }
+                Shop shop = shops.get(args[1].toLowerCase(Locale.ROOT));
+                if (shop == null) {
+                    p.sendMessage("Shop tidak ada. Cek /vshop list");
+                    return true;
+                }
+                openShop(p, shop);
+            }
+            default -> sender.sendMessage("Pakai: /vshop [menu|spawn <nama>|open <nama>|list|reload]");
         }
         return true;
     }
@@ -279,10 +420,10 @@ public final class VillagerShopPlugin extends JavaPlugin implements TabExecutor 
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
-            for (String s : List.of("menu", "spawn", "list", "reload")) {
+            for (String s : List.of("menu", "spawn", "open", "list", "reload")) {
                 if (s.startsWith(args[0].toLowerCase(Locale.ROOT))) out.add(s);
             }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("spawn")) {
+        } else if (args.length == 2 && (args[0].equalsIgnoreCase("spawn") || args[0].equalsIgnoreCase("open"))) {
             for (String k : shops.keySet()) {
                 if (k.startsWith(args[1].toLowerCase(Locale.ROOT))) out.add(k);
             }

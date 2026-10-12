@@ -3,7 +3,12 @@ package id.vshop;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -40,6 +45,34 @@ public final class MenuListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         plugin.takePending(e.getPlayer().getUniqueId());
+        plugin.takeBinding(e.getPlayer().getUniqueId());
+    }
+
+    // ------------------------------------------------------------ blok kerja
+
+    /** Mode "Set blok kerja": blok kerja yang diklik kanan menentukan profesi dan job site shop. */
+    @EventHandler(ignoreCancelled = true)
+    public void onInteract(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK || e.getHand() != EquipmentSlot.HAND) return;
+        Player p = e.getPlayer();
+        if (!plugin.isBinding(p.getUniqueId())) return;
+        Block block = e.getClickedBlock();
+        if (block == null) return;
+
+        e.setCancelled(true);
+        Shop shop = plugin.takeBinding(p.getUniqueId());
+        if (shop == null) return;
+
+        String profession = VillagerShopPlugin.WORKSTATIONS.get(block.getType());
+        if (profession == null) {
+            p.sendMessage("Itu bukan blok kerja villager. Coba lectern, composter, smoker, dll.");
+            plugin.startBinding(p, shop);
+            return;
+        }
+        shop.jobSite = VillagerShopPlugin.blockKey(block);
+        shop.profession = profession;
+        plugin.saveShops();
+        p.sendMessage("Blok kerja diatur. Profesi shop '" + shop.name + "' sekarang: " + profession + ".");
     }
 
     // ------------------------------------------------------------ clicks
@@ -148,6 +181,41 @@ public final class MenuListener implements Listener {
 
     private void handleButton(Player p, Menus.EditorHolder eh, int slot) {
         switch (slot) {
+            case 7 -> {
+                leave(eh);
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    p.closeInventory();
+                    plugin.startBinding(p, eh.shop);
+                });
+            }
+            case 16 -> {
+                eh.shop.jobSite = "";
+                Menus.refreshButtons(eh);
+            }
+            case 25 -> {
+                eh.shop.level = eh.shop.level % 5 + 1;
+                Menus.refreshButtons(eh);
+            }
+            case 26 -> {
+                int i = VillagerShopPlugin.TYPES.indexOf(eh.shop.type);
+                eh.shop.type = VillagerShopPlugin.TYPES.get((i + 1) % VillagerShopPlugin.TYPES.size());
+                Menus.refreshButtons(eh);
+            }
+            case 34 -> {
+                leave(eh);
+                int page = eh.page;
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    p.closeInventory();
+                    askName(p, eh.shop, page);
+                });
+            }
+            case 17 -> {
+                leave(eh);
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    p.closeInventory();
+                    plugin.openShop(p, eh.shop);
+                });
+            }
             case 45 -> {
                 if (eh.page > 0) changePage(p, eh, eh.page - 1);
             }
@@ -167,6 +235,14 @@ public final class MenuListener implements Listener {
                 int i = VillagerShopPlugin.PROFESSIONS.indexOf(eh.shop.profession);
                 eh.shop.profession = VillagerShopPlugin.PROFESSIONS.get((i + 1) % VillagerShopPlugin.PROFESSIONS.size());
                 Menus.refreshButtons(eh);
+            }
+            case 49 -> {
+                leave(eh);
+                int page = eh.page;
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    p.closeInventory();
+                    askRandom(p, eh.shop, page);
+                });
             }
             case 50 -> {
                 eh.shop.noAI = !eh.shop.noAI;
@@ -202,6 +278,45 @@ public final class MenuListener implements Listener {
     private void changePage(Player p, Menus.EditorHolder eh, int newPage) {
         leave(eh);
         Bukkit.getScheduler().runTask(plugin, () -> Menus.openEditor(plugin, p, eh.shop, newPage));
+    }
+
+    private void askName(Player p, Shop shop, int page) {
+        plugin.prompt(p, "Ketik nama villager (boleh pakai & untuk warna), 'hapus' untuk kosongkan, atau 'batal'.",
+                text -> {
+                    if (text.equalsIgnoreCase("hapus")) {
+                        shop.displayName = "";
+                    } else if (!text.equalsIgnoreCase("batal")) {
+                        shop.displayName = text;
+                    }
+                    plugin.saveShops();
+                    Menus.openEditor(plugin, p, shop, page);
+                });
+    }
+
+    private void askRandom(Player p, Shop shop, int page) {
+        plugin.prompt(p, "Ketik: <jumlah> <harga emerald> [max]. Contoh '10 32' = 10 enchant acak dengan level acak, "
+                + "'10 32 max' = level maksimal. Atau 'batal'.", text -> {
+            if (text.equalsIgnoreCase("batal")) {
+                Menus.openEditor(plugin, p, shop, page);
+                return;
+            }
+            try {
+                String[] t = text.trim().split("\\s+");
+                int count = Integer.parseInt(t[0]);
+                int price = Integer.parseInt(t[1]);
+                boolean max = t.length > 2 && t[2].equalsIgnoreCase("max");
+                if (count < 1 || count > 100 || price < 1 || price > 64) {
+                    throw new NumberFormatException();
+                }
+                int added = plugin.addRandomBooks(shop, count, price, max);
+                plugin.saveShops();
+                p.sendMessage(added + " trade acak ditambahkan.");
+                Menus.openEditor(plugin, p, shop, shop.trades.size() / Menus.PER_PAGE);
+            } catch (RuntimeException ex) {
+                p.sendMessage("Format salah. Contoh: 10 32  atau  10 32 max (jumlah 1-100, harga 1-64).");
+                Menus.openEditor(plugin, p, shop, page);
+            }
+        });
     }
 
     private void askAllMax(Player p, Shop shop, int page) {

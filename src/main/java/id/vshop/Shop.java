@@ -9,10 +9,12 @@ public final class Shop {
     public String profession = "librarian";
     public String type = "plains";
     public int level = 5;
-    public boolean noAI = true;
-    public boolean invulnerable = true;
+    public boolean noAI = false;
+    public boolean invulnerable = false;
     public int maxUses = 9999999;
     public final List<Trade> trades = new ArrayList<>();
+    /** Blok kerja (job site) villager, format "dunia;x;y;z". Kosong = tidak diatur. */
+    public String jobSite = "";
 
     public Shop(String name) {
         this.name = name;

@@ -6,7 +6,7 @@ description: Villager shop dengan GUI editor trade
 commands:
   vshop:
     description: Buka menu VillagerShop
-    usage: /vshop [menu|spawn <nama>|list|reload]
+    usage: /vshop [menu|spawn <nama>|open <nama>|list|reload]
     permission: vshop.admin
 permissions:
   vshop.admin:

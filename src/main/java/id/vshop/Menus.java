@@ -147,18 +147,39 @@ final class Menus {
         inv.setItem(47, named(Material.ENCHANTED_BOOK, "Isi semua enchant level maks",
                 "Klik, lalu ketik harga emerald di chat",
                 "Enchant yang sudah ada tidak diubah"));
-        inv.setItem(48, named(Material.NAME_TAG, "Profesi: " + s.profession, "Klik untuk ganti"));
-        inv.setItem(49, named(Material.PAPER, "Cara pakai",
+        Material ws = VillagerShopPlugin.workstationOf(s.profession);
+        inv.setItem(48, named(ws, "Profesi: " + s.profession,
+                ws == Material.NAME_TAG ? "Tanpa blok kerja" : "Blok kerja: " + ws.name().toLowerCase(),
+                "Klik untuk ganti"));
+        inv.setItem(7, named(Material.LECTERN, "Set blok kerja",
+                "Klik, lalu klik kanan blok kerja di dunia",
+                "Profesi ikut berubah sesuai blok itu",
+                "Sekarang: " + (s.jobSite.isBlank() ? "belum diatur" : s.jobSite.replace(';', ' '))));
+        inv.setItem(16, named(Material.BARRIER, "Lepas blok kerja", "Villager cari blok kerja sendiri"));
+        inv.setItem(17, named(Material.SPYGLASS, "Coba buka menu", "Buka trade seperti pemain biasa"));
+        inv.setItem(25, named(Material.EXPERIENCE_BOTTLE, "Level: " + s.level,
+                "Klik untuk ganti (1-5, 5 = Master)"));
+        inv.setItem(26, named(Material.OAK_SAPLING, "Biome: " + s.type, "Klik untuk ganti"));
+        inv.setItem(34, named(Material.NAME_TAG, "Nama: " + (s.displayName.isBlank() ? "-" : s.displayName),
+                "Klik, lalu ketik nama di chat",
+                "Pakai & untuk warna, ketik 'hapus' untuk kosongkan"));
+        inv.setItem(8, named(Material.PAPER, "Cara pakai",
                 "Kiri: bayar 1",
                 "Tengah: bayar 2 (boleh kosong)",
                 "Kanan: item yang dijual",
                 "Taruh item dari inventory-mu",
                 "Kosongkan slot kiri/kanan untuk hapus trade"));
+        inv.setItem(49, named(Material.ENDER_EYE, "Isi acak",
+                "Klik, lalu ketik: <jumlah> <harga> [max]",
+                "Contoh: 10 32 = 10 enchant acak, level acak",
+                "Contoh: 10 32 max = level maksimal",
+                "Enchant yang sudah ada tidak diubah"));
         inv.setItem(50, named(s.noAI ? Material.LIME_DYE : Material.GRAY_DYE,
                 "Diam di tempat: " + (s.noAI ? "ON" : "OFF"), "Klik untuk ganti"));
         inv.setItem(51, named(s.invulnerable ? Material.LIME_DYE : Material.GRAY_DYE,
                 "Tidak bisa mati: " + (s.invulnerable ? "ON" : "OFF"), "Klik untuk ganti"));
-        inv.setItem(52, named(Material.VILLAGER_SPAWN_EGG, "Spawn villager", "Muncul di posisimu"));
+        inv.setItem(52, named(Material.VILLAGER_SPAWN_EGG, "Spawn villager",
+                "Villager normal, muncul di posisimu"));
         inv.setItem(53, named(Material.EMERALD, "Simpan & kembali"));
     }
 
